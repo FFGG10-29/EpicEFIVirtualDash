@@ -2,12 +2,16 @@ package com.buttonbox.ble
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.buttonbox.ble.databinding.ActivitySplashBinding
+import java.io.BufferedReader
+import java.io.InputStreamReader
 
 @SuppressLint("CustomSplashScreen")
 class SplashActivity : AppCompatActivity() {
@@ -18,6 +22,7 @@ class SplashActivity : AppCompatActivity() {
         private const val SPLASH_DELAY = 2000L
         private const val PREFS_NAME = "epic_dash_prefs"
         private const val KEY_DISCLAIMER_ACCEPTED = "disclaimer_accepted"
+        private const val KEY_LAST_VERSION_CODE = "last_version_code"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -44,9 +49,82 @@ class SplashActivity : AppCompatActivity() {
         val disclaimerAccepted = prefs.getBoolean(KEY_DISCLAIMER_ACCEPTED, false)
         
         if (disclaimerAccepted) {
-            proceedToMain()
+            checkForUpdateAndProceed()
         } else {
             showDisclaimer()
+        }
+    }
+    
+    private fun checkForUpdateAndProceed() {
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        val lastVersionCode = prefs.getLong(KEY_LAST_VERSION_CODE, 0)
+        val currentVersionCode = getCurrentVersionCode()
+        
+        if (lastVersionCode > 0 && currentVersionCode > lastVersionCode) {
+            // App was updated - show what's new
+            showWhatsNew {
+                prefs.edit().putLong(KEY_LAST_VERSION_CODE, currentVersionCode).apply()
+                proceedToMain()
+            }
+        } else {
+            // First install or same version
+            prefs.edit().putLong(KEY_LAST_VERSION_CODE, currentVersionCode).apply()
+            proceedToMain()
+        }
+    }
+    
+    private fun getCurrentVersionCode(): Long {
+        return try {
+            val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getPackageInfo(packageName, 0)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                packageInfo.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                packageInfo.versionCode.toLong()
+            }
+        } catch (e: Exception) {
+            0L
+        }
+    }
+    
+    private fun showWhatsNew(onDismiss: () -> Unit) {
+        val whatsNewText = loadWhatsNewText()
+        val versionName = try {
+            val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getPackageInfo(packageName, 0)
+            }
+            packageInfo.versionName ?: "Unknown"
+        } catch (e: Exception) {
+            "Unknown"
+        }
+        
+        AlertDialog.Builder(this, R.style.DarkAlertDialog)
+            .setTitle("🆕 What's New in v$versionName")
+            .setMessage(whatsNewText)
+            .setPositiveButton("Got it!") { _, _ ->
+                onDismiss()
+            }
+            .setCancelable(false)
+            .show()
+    }
+    
+    private fun loadWhatsNewText(): String {
+        return try {
+            assets.open("whatsnew.txt").use { inputStream ->
+                BufferedReader(InputStreamReader(inputStream)).use { reader ->
+                    reader.readText()
+                }
+            }
+        } catch (e: Exception) {
+            "• Bug fixes and performance improvements"
         }
     }
 

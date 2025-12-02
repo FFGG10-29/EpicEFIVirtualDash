@@ -38,6 +38,22 @@ android {
     }
 }
 
+// Sync whatsnew.txt from Play Store directory to assets
+tasks.register("syncWhatsNew") {
+    doLast {
+        val source = file("../whatsnew/en-US/default.txt")
+        val dest = file("src/main/assets/whatsnew.txt")
+        if (source.exists()) {
+            source.copyTo(dest, overwrite = true)
+            println("Synced whatsnew.txt to assets")
+        }
+    }
+}
+
+tasks.named("preBuild") {
+    dependsOn("syncWhatsNew")
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
