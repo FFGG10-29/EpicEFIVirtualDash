@@ -88,3 +88,47 @@ jobs:
             Firmware/.pio/build/*/firmware.bin
             Firmware/.pio/build/*/bootloader.bin
             Firmware/.pio/build/*/partitions.bin
+
+  build-ios:
+    name: Build iOS App
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: iOS/EpicDash/Pods
+          key: ${{ runner.os }}-pods-${{ hashFiles('iOS/EpicDash/Podfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pods-
+
+      - name: Cache Xcode DerivedData
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: ${{ runner.os }}-xcode-${{ hashFiles('iOS/EpicDash/EpicDash.xcodeproj/project.pbxproj') }}
+          restore-keys: |
+            ${{ runner.os }}-xcode-
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.0.app/Contents/Developer
+
+      - name: Build iOS App (Debug)
+        working-directory: iOS/EpicDash
+        run: |
+          xcodebuild -project EpicDash.xcodeproj \
+            -scheme EpicDash \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Upload iOS Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-debug
+          path: iOS/EpicDash/build/Build/Products/Debug-iphonesimulator/EpicDash.app

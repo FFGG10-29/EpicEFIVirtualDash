@@ -3,7 +3,6 @@ Android/.gradle/
 Android/.idea/
 Android/build/
 Android/app/build/
-Android/app/release/
 Android/local.properties
 Android/*.iml
 Android/app/*.iml
@@ -15,6 +14,13 @@ Android/.cxx/
 Firmware/.pio/
 Firmware/.vscode/
 Firmware/lib/*/build/
+
+# iOS
+iOS/EpicDash/EpicDash.xcodeproj/project.xcworkspace/
+iOS/EpicDash/EpicDash.xcodeproj/xcuserdata/
+iOS/EpicDash/DerivedData/
+iOS/build/
+*.xcuserstate
 
 # IDE
 .vscode/
@@ -30,5 +36,6 @@ desktop.ini
 # Build outputs
 *.apk
 *.aab
+*.ipa
 *.bin
 *.elf

@@ -10,24 +10,24 @@ A Bluetooth Low Energy (BLE) virtual dashboard system for **EpicEFI** ECUs. Disp
 |-----------|-------------|
 | [**Firmware**](Firmware/) | ESP32-S3 BLE-to-CAN bridge |
 | [**Android App**](Android/) | Dashboard with gauges and buttons |
+| [**iOS App**](iOS/) | Dashboard with gauges and buttons |
 
 ⚠️ **OFF-ROAD USE ONLY** - This application is designed for competition and off-road use.
 
 ## Quick Start
 
 1. **Flash Firmware** to ESP32-S3 (see [Firmware README](Firmware/README.md))
-2. **Install Android App** (see [Android README](Android/README.md))
+2. **Install App** - [Android](Android/README.md) or [iOS](iOS/README.md)
 3. **Connect** - App auto-connects to "ESP32 Dashboard"
 4. **Configure** - Set up gauges and buttons in Settings
 
 ## Features
 
-### Android App
+### Mobile Apps (Android & iOS)
 - **Real-Time Gauges** - GPS speed + ECU variables (up to 60 Hz)
 - **Customizable Buttons** - 1-16 buttons, momentary or toggle mode
 - **Two-Tier Layout** - 2 large + 4 small gauges
-- **Foldable Support** - Adapts to screen changes
-- **Dark Theme** - Automotive-style UI
+- **Dark Theme** - Automotive-style UI with orange accents
 
 ### Firmware
 - **BLE Server** - Low-latency communication
@@ -85,6 +85,7 @@ Automated builds run on push to `main`. Releases are created on version tags.
 
 **Required Secrets** (Settings → Secrets → Actions):
 
+**Android:**
 | Secret | Description |
 |--------|-------------|
 | `KEYSTORE_BASE64` | Base64-encoded Android keystore (`base64 keystore.jks`) |
@@ -92,6 +93,18 @@ Automated builds run on push to `main`. Releases are created on version tags.
 | `KEY_ALIAS` | Signing key alias |
 | `KEY_PASSWORD` | Signing key password |
 | `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | Google Play API service account JSON |
+
+**iOS:**
+| Secret | Description |
+|--------|-------------|
+| `IOS_BUILD_CERTIFICATE_BASE64` | Base64-encoded .p12 distribution certificate |
+| `IOS_P12_PASSWORD` | Password for .p12 certificate |
+| `IOS_KEYCHAIN_PASSWORD` | Temporary keychain password (any value) |
+| `IOS_PROVISIONING_PROFILE_BASE64` | Base64-encoded .mobileprovision file |
+| `IOS_TEAM_ID` | Apple Developer Team ID |
+| `APP_STORE_CONNECT_API_KEY_ID` | App Store Connect API Key ID |
+| `APP_STORE_CONNECT_API_ISSUER_ID` | App Store Connect Issuer ID |
+| `APP_STORE_CONNECT_API_KEY_BASE64` | Base64-encoded .p8 API key |
 
 **Creating a Release:**
 ```bash
@@ -112,6 +125,11 @@ pio run -t upload
 1. Open `Android/` folder in Android Studio
 2. Sync Gradle
 3. Build and run on device
+
+#### iOS App (Xcode)
+1. Open `iOS/EpicDash/EpicDash.xcodeproj` in Xcode
+2. Set your development team in Signing & Capabilities
+3. Build and run on device (BLE requires physical device)
 
 ## Hardware
 
