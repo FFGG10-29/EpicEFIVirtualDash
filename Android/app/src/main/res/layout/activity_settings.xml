@@ -232,45 +232,26 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="+ Add GPS Speed"
-                    android:textColor="@color/white"
+                    android:textColor="@color/accent_orange"
                     app:backgroundTint="@color/bg_surface"
                     app:strokeColor="@color/accent_orange"
                     app:strokeWidth="1dp"
                     app:cornerRadius="8dp"
-                    android:layout_marginBottom="16dp" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Or search ECU variables:"
-                    android:textSize="11sp"
-                    android:textColor="@color/text_secondary"
+                    app:icon="@android:drawable/ic_menu_mylocation"
+                    app:iconTint="@color/accent_orange"
                     android:layout_marginBottom="8dp" />
 
-                <LinearLayout
+                <!-- Add ECU Variable Button -->
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnAddEcuVariable"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal">
-
-                    <AutoCompleteTextView
-                        android:id="@+id/actvVariableSearch"
-                        android:layout_width="0dp"
-                        android:layout_height="48dp"
-                        android:layout_weight="1"
-                        android:hint="Search variables..."
-                        android:textColor="@color/white"
-                        android:textColorHint="#666666"
-                        android:background="@drawable/button_selector"
-                        android:padding="12dp" />
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/btnAddGauge"
-                        android:layout_width="wrap_content"
-                        android:layout_height="48dp"
-                        android:layout_marginStart="8dp"
-                        android:text="Add"
-                        app:cornerRadius="8dp" />
-                </LinearLayout>
+                    android:text="+ Add ECU Variable"
+                    android:textColor="@color/bg_dark"
+                    app:backgroundTint="@color/accent_orange"
+                    app:cornerRadius="8dp"
+                    app:icon="@android:drawable/ic_input_add"
+                    app:iconTint="@color/bg_dark" />
 
                 <TextView
                     android:layout_width="wrap_content"

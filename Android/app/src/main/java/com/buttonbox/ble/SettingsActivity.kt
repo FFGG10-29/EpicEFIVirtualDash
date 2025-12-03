@@ -1,5 +1,6 @@
 package com.buttonbox.ble
 
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -11,6 +12,7 @@ import android.widget.GridLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -18,7 +20,6 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.buttonbox.ble.data.ButtonConfig
 import com.buttonbox.ble.data.ButtonMode
-import com.buttonbox.ble.data.DisplayType
 import com.buttonbox.ble.data.GaugeConfig
 import com.buttonbox.ble.data.GaugePosition
 import com.buttonbox.ble.data.SettingsManager
@@ -33,7 +34,15 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var variableRepository: VariableRepository
     private lateinit var settingsManager: SettingsManager
     private lateinit var gaugeAdapter: GaugeAdapter
-    private var selectedVariable: String? = null
+    
+    private val addGaugeLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            // Refresh gauge list when returning from AddGaugeActivity
+            gaugeAdapter.updateGauges(settingsManager.gauges)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -53,6 +62,14 @@ class SettingsActivity : AppCompatActivity() {
         setupGaugesList()  // Must be before setupVariableSearch
         setupVariableSearch()
         setupEcuId()
+    }
+    
+    override fun onResume() {
+        super.onResume()
+        // Refresh gauge list in case it was modified
+        if (::gaugeAdapter.isInitialized) {
+            gaugeAdapter.updateGauges(settingsManager.gauges)
+        }
     }
 
     private fun setupButtonCountSlider() {
@@ -194,48 +211,19 @@ class SettingsActivity : AppCompatActivity() {
             val gpsGauge = VariableRepository.GPS_SPEED_GAUGE.copy(
                 unit = settingsManager.speedUnit.name
             )
+            if (settingsManager.gauges.any { it.isGpsSpeed }) {
+                Toast.makeText(this, "GPS Speed already added", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
             settingsManager.addGauge(gpsGauge)
             gaugeAdapter.updateGauges(settingsManager.gauges)
             Toast.makeText(this, "Added GPS Speed", Toast.LENGTH_SHORT).show()
         }
         
-        val variables = variableRepository.getOutputVariables()
-        val names = variables.map { it.name }
-        val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, names)
-        binding.actvVariableSearch.setAdapter(adapter)
-        binding.actvVariableSearch.threshold = 2
-        
-        binding.actvVariableSearch.setOnItemClickListener { _, _, position, _ ->
-            selectedVariable = adapter.getItem(position)
-        }
-        
-        binding.btnAddGauge.setOnClickListener {
-            val varName = binding.actvVariableSearch.text.toString()
-            val variable = variableRepository.getVariableByName(varName)
-            
-            if (variable != null) {
-                // Ask user where to place the gauge
-                val positions = arrayOf("Top Row (large)", "Secondary Row (small)")
-                AlertDialog.Builder(this, R.style.DarkAlertDialog)
-                    .setTitle("Gauge Position")
-                    .setItems(positions) { _, which ->
-                        val position = if (which == 0) GaugePosition.TOP else GaugePosition.SECONDARY
-                        val gauge = GaugeConfig(
-                            variableHash = variable.hash,
-                            variableName = variable.name,
-                            label = variable.name.take(12),
-                            displayType = DisplayType.NUMBER,
-                            position = position
-                        )
-                        settingsManager.addGauge(gauge)
-                        gaugeAdapter.updateGauges(settingsManager.gauges)
-                        binding.actvVariableSearch.text.clear()
-                        Toast.makeText(this, "Added ${variable.name}", Toast.LENGTH_SHORT).show()
-                    }
-                    .show()
-            } else {
-                Toast.makeText(this, "Variable not found", Toast.LENGTH_SHORT).show()
-            }
+        // Add ECU Variable button - opens full-screen search
+        binding.btnAddEcuVariable.setOnClickListener {
+            val intent = Intent(this, AddGaugeActivity::class.java)
+            addGaugeLauncher.launch(intent)
         }
     }
 

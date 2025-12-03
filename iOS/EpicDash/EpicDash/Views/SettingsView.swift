@@ -333,15 +333,20 @@ struct ButtonEditorView: View {
 // MARK: - Add Gauge View
 struct AddGaugeView: View {
     @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var settingsManager: SettingsManager
     @ObservedObject var variableRepo: VariableRepository
     var onAdd: (GaugeConfig) -> Void
     
     @State private var searchText = ""
-    @State private var selectedPosition: GaugePosition = .top
+    @State private var selectedPosition: GaugePosition = .secondary  // Will be set in onAppear
     
     private let accentColor = Color(hex: "FF6B00")
     private let bgDark = Color(hex: "121212")
     private let bgSurface = Color(hex: "1E1E1E")
+    
+    var topRowFull: Bool {
+        settingsManager.gauges.filter { $0.position == .top }.count >= 2
+    }
     
     var filteredVariables: [VariableDefinition] {
         variableRepo.searchVariables(searchText)
@@ -376,13 +381,34 @@ struct AddGaugeView: View {
                     .padding()
                     
                     // Position picker
-                    Picker("Position", selection: $selectedPosition) {
-                        Text("Top Row (Large)").tag(GaugePosition.top)
-                        Text("Secondary (Small)").tag(GaugePosition.secondary)
+                    if topRowFull {
+                        // Top row full - show message
+                        HStack {
+                            Text("Top Row (Full)")
+                                .foregroundColor(.gray)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(bgSurface)
+                                .cornerRadius(8)
+                            
+                            Text("Secondary (Small)")
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(accentColor)
+                                .cornerRadius(8)
+                        }
+                        .padding(.horizontal)
+                        .padding(.bottom, 8)
+                    } else {
+                        Picker("Position", selection: $selectedPosition) {
+                            Text("Top Row (Large)").tag(GaugePosition.top)
+                            Text("Secondary (Small)").tag(GaugePosition.secondary)
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(.horizontal)
+                        .padding(.bottom, 8)
                     }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal)
-                    .padding(.bottom, 8)
                     
                     // Variable count
                     HStack {
@@ -430,19 +456,33 @@ struct AddGaugeView: View {
                     }
                 }
             }
+            .onAppear {
+                // Set initial position based on availability
+                selectedPosition = topRowFull ? .secondary : .top
+            }
         }
     }
     
     private func addGauge(_ variable: VariableDefinition) {
+        // Force secondary if top is full
+        let position = topRowFull ? .secondary : selectedPosition
+        
         let gauge = GaugeConfig(
             name: String(variable.name.prefix(12)),
             variableHash: variable.hash,
             variableName: variable.name,
             unit: "",
-            position: selectedPosition
+            position: position
         )
         onAdd(gauge)
         dismiss()
+    }
+}
+
+extension AddGaugeView {
+    init(variableRepo: VariableRepository, onAdd: @escaping (GaugeConfig) -> Void) {
+        self.variableRepo = variableRepo
+        self.onAdd = onAdd
     }
 }
 

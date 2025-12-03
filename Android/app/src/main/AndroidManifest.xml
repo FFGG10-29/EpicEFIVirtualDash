@@ -37,6 +37,11 @@
             android:name=".SettingsActivity"
             android:exported="false"
             android:label="Settings" />
+        <activity
+            android:name=".AddGaugeActivity"
+            android:exported="false"
+            android:label="Add Gauge"
+            android:windowSoftInputMode="adjustResize" />
     </application>
 
 </manifest>
