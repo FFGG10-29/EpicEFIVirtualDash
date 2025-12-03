@@ -475,16 +475,29 @@ class MainActivity : AppCompatActivity(), BleManager.BleCallback {
 
     @SuppressLint("MissingPermission")
     private fun startLocationUpdates() {
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 500)
-            .setMinUpdateIntervalMillis(200)
+        // Request fastest possible GPS updates for precision
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 100)  // 10Hz target
+            .setMinUpdateIntervalMillis(50)  // Allow up to 20Hz
+            .setMaxUpdateDelayMillis(100)
             .build()
         
         try {
             fusedLocationClient.requestLocationUpdates(request, locationCallback, Looper.getMainLooper())
+            log("GPS updates started (high precision mode)")
         } catch (e: SecurityException) {
             log("Location permission denied")
         }
     }
+    
+    // Track last GPS values to only send on change
+    private var lastGpsSpeed = -1f
+    private var lastGpsLatitude = -999.0
+    private var lastGpsLongitude = -999.0
+    private var lastGpsAltitude = -9999f
+    private var lastGpsCourse = -1f
+    private var lastGpsAccuracy = -1f
+    private var lastGpsHmsdPacked = -1
+    private var lastGpsMyqsatPacked = -1
 
     private fun updateSpeed(location: Location) {
         val speedMs = location.speed
@@ -496,6 +509,120 @@ class MainActivity : AppCompatActivity(), BleManager.BleCallback {
         
         // Update GPS speed gauge if present
         gpsSpeedView?.text = speed.toInt().toString()
+        
+        // Send GPS data to ECU via BLE -> ESP32 -> CAN (only if changed)
+        if (bleManager.isConnected) {
+            sendGpsDataToCan(location)
+        }
+    }
+    
+    /**
+     * Pack GPS HMSD (hours, minutes, seconds, days) into uint32
+     * Format: hours | (minutes << 8) | (seconds << 16) | (days << 24)
+     */
+    private fun packGpsHmsd(hours: Int, minutes: Int, seconds: Int, days: Int): Int {
+        return (hours and 0xFF) or
+               ((minutes and 0xFF) shl 8) or
+               ((seconds and 0xFF) shl 16) or
+               ((days and 0xFF) shl 24)
+    }
+    
+    /**
+     * Pack GPS MYQSAT (months, years, quality, satellites) into uint32
+     * Format: months | (years << 8) | (quality << 16) | (satellites << 24)
+     */
+    private fun packGpsMyqsat(months: Int, years: Int, quality: Int, satellites: Int): Int {
+        return (months and 0xFF) or
+               ((years and 0xFF) shl 8) or
+               ((quality and 0xFF) shl 16) or
+               ((satellites and 0xFF) shl 24)
+    }
+    
+    private fun sendGpsDataToCan(location: Location) {
+        val gpsEntries = mutableListOf<Pair<Int, Float>>()
+        
+        // Get current time for HMSD packed value
+        val calendar = java.util.Calendar.getInstance()
+        val hours = calendar.get(java.util.Calendar.HOUR_OF_DAY)
+        val minutes = calendar.get(java.util.Calendar.MINUTE)
+        val seconds = calendar.get(java.util.Calendar.SECOND)
+        val days = calendar.get(java.util.Calendar.DAY_OF_MONTH)
+        val months = calendar.get(java.util.Calendar.MONTH) + 1  // Calendar months are 0-based
+        val years = calendar.get(java.util.Calendar.YEAR) % 100  // 2-digit year
+        
+        // Quality: 1 = GPS fix, Satellites: estimate from accuracy
+        val quality = if (location.hasAccuracy() && location.accuracy < 100) 1 else 0
+        val satellites = if (location.hasAccuracy()) maxOf(4, (100 / maxOf(1f, location.accuracy)).toInt()) else 0
+        
+        // Pack HMSD (hours, minutes, seconds, days)
+        val hmsdPacked = packGpsHmsd(hours, minutes, seconds, days)
+        if (hmsdPacked != lastGpsHmsdPacked) {
+            lastGpsHmsdPacked = hmsdPacked
+            // Send as packed uint32 (raw bytes, not float)
+            log("GPS HMSD: h=$hours m=$minutes s=$seconds d=$days packed=0x${Integer.toHexString(hmsdPacked)}")
+            bleManager.sendGpsDataPacked(BleManager.VAR_HASH_GPS_HMSD_PACKED, hmsdPacked)
+        }
+        
+        // Pack MYQSAT (months, years, quality, satellites)
+        val myqsatPacked = packGpsMyqsat(months, years, quality, satellites)
+        if (myqsatPacked != lastGpsMyqsatPacked) {
+            lastGpsMyqsatPacked = myqsatPacked
+            log("GPS MYQSAT: mo=$months y=$years q=$quality sat=$satellites packed=0x${Integer.toHexString(myqsatPacked)}")
+            bleManager.sendGpsDataPacked(BleManager.VAR_HASH_GPS_MYQSAT_PACKED, myqsatPacked)
+        }
+        
+        // Speed (m/s)
+        val speedMs = location.speed
+        if (speedMs != lastGpsSpeed) {
+            lastGpsSpeed = speedMs
+            gpsEntries.add(BleManager.VAR_HASH_GPS_SPEED to speedMs)
+        }
+        
+        // Latitude
+        val lat = location.latitude.toFloat()
+        if (location.latitude != lastGpsLatitude) {
+            lastGpsLatitude = location.latitude
+            gpsEntries.add(BleManager.VAR_HASH_GPS_LATITUDE to lat)
+        }
+        
+        // Longitude
+        val lon = location.longitude.toFloat()
+        if (location.longitude != lastGpsLongitude) {
+            lastGpsLongitude = location.longitude
+            gpsEntries.add(BleManager.VAR_HASH_GPS_LONGITUDE to lon)
+        }
+        
+        // Altitude
+        if (location.hasAltitude()) {
+            val alt = location.altitude.toFloat()
+            if (alt != lastGpsAltitude) {
+                lastGpsAltitude = alt
+                gpsEntries.add(BleManager.VAR_HASH_GPS_ALTITUDE to alt)
+            }
+        }
+        
+        // Course/Bearing
+        if (location.hasBearing()) {
+            val course = location.bearing
+            if (course != lastGpsCourse) {
+                lastGpsCourse = course
+                gpsEntries.add(BleManager.VAR_HASH_GPS_COURSE to course)
+            }
+        }
+        
+        // Accuracy
+        if (location.hasAccuracy()) {
+            val accuracy = location.accuracy
+            if (accuracy != lastGpsAccuracy) {
+                lastGpsAccuracy = accuracy
+                gpsEntries.add(BleManager.VAR_HASH_GPS_ACCURACY to accuracy)
+            }
+        }
+        
+        // Send all changed float values in one batch
+        if (gpsEntries.isNotEmpty()) {
+            bleManager.sendGpsDataBatch(gpsEntries)
+        }
     }
 
     private fun startConnection() {

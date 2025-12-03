@@ -25,6 +25,17 @@ class BleManager(private val context: Context) {
         val CHAR_BUTTON_UUID: UUID = UUID.fromString("beb5483e-36e1-4688-b7f5-ea07361b26a8")
         val CHAR_VAR_DATA_UUID: UUID = UUID.fromString("beb5483e-36e1-4688-b7f5-ea07361b26a9")
         val CHAR_VAR_REQUEST_UUID: UUID = UUID.fromString("beb5483e-36e1-4688-b7f5-ea07361b26aa")
+        val CHAR_GPS_DATA_UUID: UUID = UUID.fromString("beb5483e-36e1-4688-b7f5-ea07361b26ab")
+        
+        // GPS variable hashes for CAN transmission
+        const val VAR_HASH_GPS_HMSD_PACKED = 703958849
+        const val VAR_HASH_GPS_MYQSAT_PACKED = -1519914092
+        const val VAR_HASH_GPS_ACCURACY = -1489698215
+        const val VAR_HASH_GPS_ALTITUDE = -2100224086
+        const val VAR_HASH_GPS_COURSE = 1842893663
+        const val VAR_HASH_GPS_LATITUDE = 1524934922
+        const val VAR_HASH_GPS_LONGITUDE = -809214087
+        const val VAR_HASH_GPS_SPEED = -1486968225
         
         private const val DEVICE_NAME = "ESP32 Dashboard"
         private const val SCAN_TIMEOUT_MS = 10000L
@@ -42,6 +53,7 @@ class BleManager(private val context: Context) {
     private var buttonCharacteristic: BluetoothGattCharacteristic? = null
     private var varDataCharacteristic: BluetoothGattCharacteristic? = null
     private var varRequestCharacteristic: BluetoothGattCharacteristic? = null
+    private var gpsDataCharacteristic: BluetoothGattCharacteristic? = null
     private var callback: BleCallback? = null
     private var isScanning = false
     private val handler = Handler(Looper.getMainLooper())
@@ -49,8 +61,10 @@ class BleManager(private val context: Context) {
     // Write queues for rapid operations
     private val buttonWriteQueue = ArrayDeque<ByteArray>()
     private val varRequestQueue = ArrayDeque<ByteArray>()
+    private val gpsDataQueue = ArrayDeque<ByteArray>()
     private var isWritingButton = false
     private var isWritingVarRequest = false
+    private var isWritingGpsData = false
 
     val isConnected: Boolean
         get() = bluetoothGatt != null && buttonCharacteristic != null
@@ -137,26 +151,32 @@ class BleManager(private val context: Context) {
         buttonCharacteristic = null
         varDataCharacteristic = null
         varRequestCharacteristic = null
+        gpsDataCharacteristic = null
         buttonWriteQueue.clear()
         varRequestQueue.clear()
+        gpsDataQueue.clear()
         isWritingButton = false
         isWritingVarRequest = false
+        isWritingGpsData = false
         callback?.onConnectionStateChanged(false)
     }
 
     private val gattCallback = object : BluetoothGattCallback() {
         @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+            log("Connection state: newState=$newState status=$status")
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     log("Connected to GATT server")
-                    handler.post { gatt.discoverServices() }
+                    // Small delay before service discovery for stability
+                    handler.postDelayed({ gatt.discoverServices() }, 100)
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
-                    log("Disconnected from GATT server")
+                    log("Disconnected from GATT server (status=$status)")
                     buttonCharacteristic = null
                     varDataCharacteristic = null
                     varRequestCharacteristic = null
+                    gpsDataCharacteristic = null
                     handler.post { callback?.onConnectionStateChanged(false) }
                 }
             }
@@ -179,6 +199,13 @@ class BleManager(private val context: Context) {
             buttonCharacteristic = service.getCharacteristic(CHAR_BUTTON_UUID)
             varDataCharacteristic = service.getCharacteristic(CHAR_VAR_DATA_UUID)
             varRequestCharacteristic = service.getCharacteristic(CHAR_VAR_REQUEST_UUID)
+            gpsDataCharacteristic = service.getCharacteristic(CHAR_GPS_DATA_UUID)
+            
+            // Log which characteristics were found
+            log("Button char: ${if (buttonCharacteristic != null) "OK" else "MISSING"}")
+            log("VarData char: ${if (varDataCharacteristic != null) "OK" else "MISSING"}")
+            log("VarRequest char: ${if (varRequestCharacteristic != null) "OK" else "MISSING"}")
+            log("GPS char: ${if (gpsDataCharacteristic != null) "OK" else "MISSING"}")
             
             // Enable notifications for variable data
             varDataCharacteristic?.let { char ->
@@ -228,6 +255,10 @@ class BleManager(private val context: Context) {
                 CHAR_VAR_REQUEST_UUID -> {
                     isWritingVarRequest = false
                     processVarRequestQueue()
+                }
+                CHAR_GPS_DATA_UUID -> {
+                    isWritingGpsData = false
+                    processGpsDataQueue()
                 }
             }
         }
@@ -307,6 +338,97 @@ class BleManager(private val context: Context) {
         
         if (!isWritingVarRequest) {
             processVarRequestQueue()
+        }
+        return true
+    }
+    
+    @SuppressLint("MissingPermission")
+    private fun processGpsDataQueue() {
+        if (isWritingGpsData || gpsDataQueue.isEmpty()) return
+        
+        val data = gpsDataQueue.poll() ?: return
+        val char = gpsDataCharacteristic ?: return
+        val gatt = bluetoothGatt ?: return
+        
+        char.value = data
+        char.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
+        isWritingGpsData = gatt.writeCharacteristic(char)
+    }
+    
+    /**
+     * Send GPS data to ESP32 for CAN transmission to ECU
+     * Format: [0..3] VarHash (int32 BE), [4..7] Value (float32 BE)
+     */
+    fun sendGpsData(varHash: Int, value: Float): Boolean {
+        if (!isConnected || gpsDataCharacteristic == null) return false
+        
+        val data = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN)
+            .putInt(varHash)
+            .putFloat(value)
+            .array()
+        gpsDataQueue.offer(data)
+        
+        if (!isWritingGpsData) {
+            processGpsDataQueue()
+        }
+        return true
+    }
+    
+    /**
+     * Send packed GPS data (uint32) to ESP32 for CAN transmission
+     * Used for HMSD and MYQSAT packed values
+     * The packed value is sent as raw bytes (not as float)
+     */
+    fun sendGpsDataPacked(varHash: Int, packedValue: Int): Boolean {
+        if (!isConnected || gpsDataCharacteristic == null) return false
+        
+        val data = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN)
+            .putInt(varHash)
+            .putInt(packedValue)
+            .array()
+        
+        // Debug: print raw bytes
+        val hexStr = data.joinToString(" ") { String.format("%02X", it) }
+        log("GPS packed: hash=$varHash val=0x${Integer.toHexString(packedValue)} bytes=$hexStr")
+        
+        gpsDataQueue.offer(data)
+        
+        if (!isWritingGpsData) {
+            processGpsDataQueue()
+        }
+        return true
+    }
+    
+    /**
+     * Send multiple GPS data entries in one BLE write (batched for efficiency)
+     */
+    fun sendGpsDataBatch(entries: List<Pair<Int, Float>>): Boolean {
+        if (!isConnected) {
+            log("GPS batch: not connected")
+            return false
+        }
+        if (gpsDataCharacteristic == null) {
+            log("GPS batch: no characteristic!")
+            return false
+        }
+        if (entries.isEmpty()) return false
+        
+        val data = ByteBuffer.allocate(entries.size * 8).order(ByteOrder.BIG_ENDIAN)
+        for ((hash, value) in entries) {
+            data.putInt(hash)
+            data.putFloat(value)
+            log("GPS queue: hash=$hash val=$value")
+        }
+        
+        // Debug: print raw bytes
+        val bytes = data.array()
+        val hexStr = bytes.joinToString(" ") { String.format("%02X", it) }
+        log("GPS raw bytes: $hexStr")
+        
+        gpsDataQueue.offer(bytes)
+        
+        if (!isWritingGpsData) {
+            processGpsDataQueue()
         }
         return true
     }

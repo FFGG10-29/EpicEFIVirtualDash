@@ -5,6 +5,13 @@
 #include <BLE2902.h>
 #include <CANfetti.hpp>
 
+#ifdef CORE_DEBUG_LEVEL
+#undef CORE_DEBUG_LEVEL
+#endif
+
+#define CORE_DEBUG_LEVEL 3
+#define LOG_LOCAL_LEVEL ESP_LOG_DEBUG
+
 #define RGB_PIN 38       // WS2812 data pin
 
 #define TS_HW_BUTTONBOX1_CATEGORY 27 // hardware button box 1
@@ -14,18 +21,32 @@
 #define ECU_ID 1
 #define CAN_VAR_REQUEST_BASE 0x700  // TX: Request variable (0x700 + ecuId)
 #define CAN_VAR_RESPONSE_BASE 0x720 // RX: Variable broadcast (0x720 + ecuId)
+#define CAN_GPS_DATA_BASE 0x780     // TX: GPS data to ECU (0x780 + ecuId)
+
+// GPS variable hashes (for CAN transmission to ECU)
+const int32_t VAR_HASH_GPS_HMSD_PACKED = 703958849;       // Hours, minutes, seconds, days (packed)
+const int32_t VAR_HASH_GPS_MYQSAT_PACKED = -1519914092;   // Months, years, quality, satellites (packed)
+const int32_t VAR_HASH_GPS_ACCURACY = -1489698215;
+const int32_t VAR_HASH_GPS_ALTITUDE = -2100224086;
+const int32_t VAR_HASH_GPS_COURSE = 1842893663;
+const int32_t VAR_HASH_GPS_LATITUDE = 1524934922;
+const int32_t VAR_HASH_GPS_LONGITUDE = -809214087;
+const int32_t VAR_HASH_GPS_SPEED = -1486968225;
 
 // BLE UUIDs - must match Android app
 #define SERVICE_UUID           "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHAR_BUTTON_UUID       "beb5483e-36e1-4688-b7f5-ea07361b26a8"  // Write buttons (no response)
 #define CHAR_VAR_DATA_UUID     "beb5483e-36e1-4688-b7f5-ea07361b26a9"  // Notify var data
 #define CHAR_VAR_REQUEST_UUID  "beb5483e-36e1-4688-b7f5-ea07361b26aa"  // Write var request
+#define CHAR_GPS_DATA_UUID     "beb5483e-36e1-4688-b7f5-ea07361b26ab"  // Write GPS data (phone -> ESP32 -> CAN)
 
 // Forward declarations
 void setupCan();
 void setupBLE();
 void sendButtonCanFrame(uint16_t buttonMask);
 void requestCanVariable(int32_t varHash);
+void sendGpsDataToCan(int32_t varHash, float value);
+void sendGpsDataToCan(int32_t varHash, uint32_t packedValue);
 void processCanRx();
 void logMessage(const String& message);
 
@@ -49,12 +70,29 @@ static inline float readFloat32BigEndian(const uint8_t* in) {
     return conv.f;
 }
 
+static inline void writeFloat32BigEndian(float value, uint8_t* out) {
+    union { float f; uint32_t u; } conv;
+    conv.f = value;
+    out[0] = (uint8_t)((conv.u >> 24) & 0xFF);
+    out[1] = (uint8_t)((conv.u >> 16) & 0xFF);
+    out[2] = (uint8_t)((conv.u >> 8) & 0xFF);
+    out[3] = (uint8_t)(conv.u & 0xFF);
+}
+
+static inline void writeUint32BigEndian(uint32_t value, uint8_t* out) {
+    out[0] = (uint8_t)((value >> 24) & 0xFF);
+    out[1] = (uint8_t)((value >> 16) & 0xFF);
+    out[2] = (uint8_t)((value >> 8) & 0xFF);
+    out[3] = (uint8_t)(value & 0xFF);
+}
+
 // Globals
 CANfettiManager canManager;
 BLEServer* pServer = nullptr;
 BLECharacteristic* pButtonChar = nullptr;
 BLECharacteristic* pVarDataChar = nullptr;
 BLECharacteristic* pVarRequestChar = nullptr;
+BLECharacteristic* pGpsDataChar = nullptr;
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 uint16_t lastButtonMask = 0;
@@ -127,8 +165,53 @@ class VarRequestCharCallbacks : public BLECharacteristicCallbacks {
       // Start requesting first variable
       if (pendingVarCount > 0) {
         requestCanVariable(pendingVarHashes[0]);
-        logMessage(String("Batch request: ") + String(pendingVarCount) + " vars");
+        //logMessage(String("Batch request: ") + String(pendingVarCount) + " vars");
       }
+    }
+  }
+};
+
+// GPS Data Callbacks - receives GPS data from phone app, forwards to CAN
+// Format: [0..3] VarHash (int32 BE), [4..7] Value (float32 BE or uint32 BE for packed)
+class GpsDataCharCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic* pCharacteristic) override {
+    std::string value = pCharacteristic->getValue();
+    size_t len = value.length();
+    
+    if (len < 8) {
+      logMessage("GPS data too short!");
+      return;
+    }
+    
+    // Process multiple GPS data entries (8 bytes each)
+    for (size_t i = 0; i + 8 <= len; i += 8) {
+      const uint8_t* data = (const uint8_t*)value.data() + i;
+      int32_t varHash = readInt32BigEndian(data);
+      uint32_t rawValue = ((uint32_t)data[4] << 24) | ((uint32_t)data[5] << 16) | 
+                          ((uint32_t)data[6] << 8) | (uint32_t)data[7];
+      
+      // Forward directly to CAN - data is already in correct format
+      uint8_t canData[8];
+      memcpy(canData, data, 8);
+      
+      CANfettiFrame frame = CANfetti()
+                              .setId(CAN_GPS_DATA_BASE + ECU_ID)
+                              .setDataLength(8)
+                              .setData(canData, 8)
+                              .build();
+      
+      bool ok = canManager.sendMessage(frame);
+      
+      // Log all GPS values for debugging
+     /* if (varHash == VAR_HASH_GPS_HMSD_PACKED || varHash == VAR_HASH_GPS_MYQSAT_PACKED) {
+        logMessage(String("GPS U32: hash=") + String(varHash) + " val=0x" + String(rawValue, HEX) + 
+                   " ok=" + String(ok ? "Y" : "N"));
+      } else {
+        // Float value - decode and log
+        float floatVal = readFloat32BigEndian(data + 4);
+        logMessage(String("GPS F32: hash=") + String(varHash) + " val=" + String(floatVal, 4) + 
+                   " ok=" + String(ok ? "Y" : "N"));
+      }*/
     }
   }
 };
@@ -150,7 +233,7 @@ void sendButtonCanFrame(uint16_t buttonMask) {
 
   bool ok = canManager.sendMessage(frame);
   if (ok) {
-    logMessage(String("CAN TX 0x711 mask=0x") + String(buttonMask, HEX));
+    //logMessage(String("CAN TX 0x711 mask=0x") + String(buttonMask, HEX));
   }
 }
 
@@ -167,7 +250,7 @@ void requestCanVariable(int32_t varHash) {
 
   bool ok = canManager.sendMessage(frame);
   if (ok) {
-    logMessage(String("CAN TX var request hash=") + String(varHash));
+    //logMessage(String("CAN TX var request hash=") + String(varHash));
   }
 }
 
@@ -195,7 +278,7 @@ void processCanRx() {
           if (batchResponseCount > 0) {
             pVarDataChar->setValue(batchResponseBuffer, batchResponseCount * VAR_RESPONSE_SIZE);
             pVarDataChar->notify();
-            logMessage(String("BLE TX batch: ") + String(batchResponseCount) + " vars");
+            //logMessage(String("BLE TX batch: ") + String(batchResponseCount) + " vars");
           }
           // Reset for next batch
           pendingVarCount = 0;
@@ -213,8 +296,10 @@ void sendCMD(uint16_t buttonMask) {
 }
 
 void setup() {
-  Serial.begin(115200);
-  
+
+  Serial.begin(921600);
+  Serial.setDebugOutput(true);
+
   // CAN transceiver control pin
   pinMode(9, OUTPUT);
   digitalWrite(9, LOW); // LOW = high speed mode
@@ -254,11 +339,15 @@ void setupCan() {
 void setupBLE() {
   BLEDevice::init("ESP32 Dashboard");
   
+  // Set MTU size for larger packets
+  BLEDevice::setMTU(517);
+  
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
   
-  // Create service with enough handles for 3 characteristics
-  BLEService* pService = pServer->createService(BLEUUID(SERVICE_UUID), 15);
+  // Create service with enough handles for 4 characteristics (5 handles per char)
+  // 4 chars * 5 handles = 20, plus service handle = 21, round up to 25
+  BLEService* pService = pServer->createService(BLEUUID(SERVICE_UUID), 25);
   
   // Button characteristic - write only, no response for speed
   pButtonChar = pService->createCharacteristic(
@@ -280,6 +369,13 @@ void setupBLE() {
     BLECharacteristic::PROPERTY_WRITE_NR
   );
   pVarRequestChar->setCallbacks(new VarRequestCharCallbacks());
+  
+  // GPS data characteristic - write only (Phone -> ESP32 -> CAN)
+  pGpsDataChar = pService->createCharacteristic(
+    CHAR_GPS_DATA_UUID,
+    BLECharacteristic::PROPERTY_WRITE_NR
+  );
+  pGpsDataChar->setCallbacks(new GpsDataCharCallbacks());
   
   pService->start();
   

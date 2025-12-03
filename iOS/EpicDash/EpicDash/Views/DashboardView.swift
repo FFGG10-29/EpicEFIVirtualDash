@@ -191,6 +191,20 @@ struct DashboardView: View {
         bleManager.onVariableData = { hash, value in
             dashboardState.updateGaugeValue(hash: hash, value: value)
         }
+        
+        // Setup GPS -> BLE -> CAN transmission
+        locationManager.onGpsUpdate = { [weak bleManager, weak locationManager] location in
+            guard let bleManager = bleManager, let locationManager = locationManager else { return }
+            guard bleManager.isConnected else { return }
+            
+            // Build GPS entries (only changed values)
+            let entries = locationManager.buildGpsEntries(from: location)
+            
+            // Send to BLE if there are changes
+            if !entries.isEmpty {
+                bleManager.sendGpsDataBatch(entries)
+            }
+        }
     }
     
     private func sendButtonMask() {

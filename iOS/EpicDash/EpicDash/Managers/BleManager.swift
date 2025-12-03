@@ -8,6 +8,17 @@ class BleManager: NSObject, ObservableObject {
     static let buttonCharUUID = CBUUID(string: "beb5483e-36e1-4688-b7f5-ea07361b26a8")
     static let varDataCharUUID = CBUUID(string: "beb5483e-36e1-4688-b7f5-ea07361b26a9")
     static let varRequestCharUUID = CBUUID(string: "beb5483e-36e1-4688-b7f5-ea07361b26aa")
+    static let gpsDataCharUUID = CBUUID(string: "beb5483e-36e1-4688-b7f5-ea07361b26ab")
+    
+    // GPS variable hashes for CAN transmission
+    static let VAR_HASH_GPS_HMSD_PACKED: Int32 = 703958849
+    static let VAR_HASH_GPS_MYQSAT_PACKED: Int32 = -1519914092
+    static let VAR_HASH_GPS_ACCURACY: Int32 = -1489698215
+    static let VAR_HASH_GPS_ALTITUDE: Int32 = -2100224086
+    static let VAR_HASH_GPS_COURSE: Int32 = 1842893663
+    static let VAR_HASH_GPS_LATITUDE: Int32 = 1524934922
+    static let VAR_HASH_GPS_LONGITUDE: Int32 = -809214087
+    static let VAR_HASH_GPS_SPEED: Int32 = -1486968225
     
     private static let deviceName = "ESP32 Dashboard"
     
@@ -25,11 +36,14 @@ class BleManager: NSObject, ObservableObject {
     private var buttonCharacteristic: CBCharacteristic?
     private var varDataCharacteristic: CBCharacteristic?
     private var varRequestCharacteristic: CBCharacteristic?
+    private var gpsDataCharacteristic: CBCharacteristic?
     
     private var buttonWriteQueue: [Data] = []
     private var varRequestQueue: [Data] = []
+    private var gpsDataQueue: [Data] = []
     private var isWritingButton = false
     private var isWritingVarRequest = false
+    private var isWritingGpsData = false
     
     override init() {
         super.init()
@@ -117,16 +131,67 @@ class BleManager: NSObject, ObservableObject {
         processVarRequestQueue()
     }
     
+    // MARK: - GPS Data Methods
+    func sendGpsData(varHash: Int32, value: Float) {
+        guard isConnected, gpsDataCharacteristic != nil else { return }
+        
+        var data = Data(count: 8)
+        // Hash (big-endian)
+        data[0] = UInt8((varHash >> 24) & 0xFF)
+        data[1] = UInt8((varHash >> 16) & 0xFF)
+        data[2] = UInt8((varHash >> 8) & 0xFF)
+        data[3] = UInt8(varHash & 0xFF)
+        // Value (big-endian float)
+        let valueBits = value.bitPattern.bigEndian
+        withUnsafeBytes(of: valueBits) { bytes in
+            data[4] = bytes[0]
+            data[5] = bytes[1]
+            data[6] = bytes[2]
+            data[7] = bytes[3]
+        }
+        
+        gpsDataQueue.append(data)
+        processGpsDataQueue()
+    }
+    
+    func sendGpsDataBatch(_ entries: [(hash: Int32, value: Float)]) {
+        guard isConnected, gpsDataCharacteristic != nil, !entries.isEmpty else { return }
+        
+        var data = Data(count: entries.count * 8)
+        for (index, entry) in entries.enumerated() {
+            let offset = index * 8
+            // Hash (big-endian)
+            data[offset] = UInt8((entry.hash >> 24) & 0xFF)
+            data[offset + 1] = UInt8((entry.hash >> 16) & 0xFF)
+            data[offset + 2] = UInt8((entry.hash >> 8) & 0xFF)
+            data[offset + 3] = UInt8(entry.hash & 0xFF)
+            // Value (big-endian float)
+            let valueBits = entry.value.bitPattern.bigEndian
+            withUnsafeBytes(of: valueBits) { bytes in
+                data[offset + 4] = bytes[0]
+                data[offset + 5] = bytes[1]
+                data[offset + 6] = bytes[2]
+                data[offset + 7] = bytes[3]
+            }
+        }
+        
+        gpsDataQueue.append(data)
+        processGpsDataQueue()
+    }
+    
     // MARK: - Private Methods
     private func cleanup() {
         peripheral = nil
         buttonCharacteristic = nil
         varDataCharacteristic = nil
         varRequestCharacteristic = nil
+        gpsDataCharacteristic = nil
         buttonWriteQueue.removeAll()
         varRequestQueue.removeAll()
+        gpsDataQueue.removeAll()
         isWritingButton = false
         isWritingVarRequest = false
+        isWritingGpsData = false
         
         DispatchQueue.main.async {
             self.isConnected = false
@@ -159,6 +224,20 @@ class BleManager: NSObject, ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) { [weak self] in
             self?.isWritingVarRequest = false
             self?.processVarRequestQueue()
+        }
+    }
+    
+    private func processGpsDataQueue() {
+        guard !isWritingGpsData, !gpsDataQueue.isEmpty,
+              let char = gpsDataCharacteristic, let peripheral = peripheral else { return }
+        
+        let data = gpsDataQueue.removeFirst()
+        isWritingGpsData = true
+        peripheral.writeValue(data, for: char, type: .withoutResponse)
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.005) { [weak self] in
+            self?.isWritingGpsData = false
+            self?.processGpsDataQueue()
         }
     }
     
@@ -231,7 +310,8 @@ extension BleManager: CBPeripheralDelegate {
                 peripheral.discoverCharacteristics([
                     Self.buttonCharUUID,
                     Self.varDataCharUUID,
-                    Self.varRequestCharUUID
+                    Self.varRequestCharUUID,
+                    Self.gpsDataCharUUID
                 ], for: service)
             }
         }
@@ -252,6 +332,9 @@ extension BleManager: CBPeripheralDelegate {
             case Self.varRequestCharUUID:
                 varRequestCharacteristic = char
                 log("Found variable request characteristic")
+            case Self.gpsDataCharUUID:
+                gpsDataCharacteristic = char
+                log("Found GPS data characteristic")
             default:
                 break
             }
