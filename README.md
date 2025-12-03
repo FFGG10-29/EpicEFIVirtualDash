@@ -4,6 +4,14 @@ A Bluetooth Low Energy (BLE) virtual dashboard system for **EpicEFI** ECUs. Disp
 
 ![EpicEFI](logo.png)
 
+## Build Status
+
+| Component | Status |
+|-----------|--------|
+| **Android** | ![Android Build](https://github.com/AKCore/EpicEFIVirtualDash/actions/workflows/build.yml/badge.svg?branch=main&event=push&job=build-android) |
+| **Firmware** | ![Firmware Build](https://github.com/AKCore/EpicEFIVirtualDash/actions/workflows/build.yml/badge.svg?branch=main&event=push&job=build-firmware) |
+| **iOS** | ![iOS Build](https://github.com/AKCore/EpicEFIVirtualDash/actions/workflows/build.yml/badge.svg?branch=main&event=push&job=build-ios) |
+
 ## Overview
 
 | Component | Description |
@@ -95,6 +103,9 @@ Automated builds run on push to `main`. Releases are created on version tags.
 | `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | Google Play API service account JSON |
 
 **iOS:**
+
+To enable iOS builds, set the repository variable `IOS_BUILD_ENABLED` to `true` (Settings → Variables → Repository variables).
+
 | Secret | Description |
 |--------|-------------|
 | `IOS_BUILD_CERTIFICATE_BASE64` | Base64-encoded .p12 distribution certificate |
@@ -107,10 +118,13 @@ Automated builds run on push to `main`. Releases are created on version tags.
 | `APP_STORE_CONNECT_API_KEY_BASE64` | Base64-encoded .p8 API key |
 
 **Creating a Release:**
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
+
+1. Update the `VERSION` file with the new version number
+2. Go to Actions → Build → Run workflow
+3. Check "Create a GitHub release" checkbox
+4. Click "Run workflow"
+
+The release will be created with the version from the `VERSION` file.
 
 ### Local Build
 

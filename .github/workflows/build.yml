@@ -6,10 +6,16 @@ on:
   pull_request:
     branches: [main, master]
   workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create a GitHub release'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   build-android:
-    name: Build Android APK
+    name: Build Android
     runs-on: ubuntu-latest
     
     steps:
@@ -39,13 +45,13 @@ jobs:
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
+          name: android-debug
           path: Android/app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-release-unsigned
+          name: android-release
           path: Android/app/build/outputs/apk/release/app-release-unsigned.apk
 
   build-firmware:
@@ -90,11 +96,10 @@ jobs:
             Firmware/.pio/build/*/partitions.bin
 
   build-ios:
-    name: Build iOS App
+    name: Build iOS
     runs-on: macos-latest
-    # Skip iOS build until Apple Developer account is set up
-    # Remove this 'if' condition and add secrets when ready
-    if: ${{ secrets.IOS_TEAM_ID != '' }}
+    # Only run iOS build if secrets are configured
+    if: vars.IOS_BUILD_ENABLED == 'true'
     
     steps:
       - name: Checkout
@@ -194,3 +199,58 @@ jobs:
         if: always()
         run: |
           security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build-android, build-firmware]
+    if: github.event.inputs.create_release == 'true'
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: echo "version=$(cat VERSION)" >> $GITHUB_OUTPUT
+
+      - name: Download Android artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: android-release
+          path: release/
+
+      - name: Download Firmware artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: firmware
+          path: release/firmware/
+
+      - name: Rename artifacts
+        run: |
+          mv release/app-release-unsigned.apk release/EpicDash-v${{ steps.version.outputs.version }}.apk || true
+          # Flatten firmware files
+          find release/firmware -name "*.bin" -exec mv {} release/ \; || true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: EpicDash v${{ steps.version.outputs.version }}
+          draft: false
+          prerelease: false
+          files: |
+            release/*.apk
+            release/*.bin
+          body: |
+            ## EpicDash v${{ steps.version.outputs.version }}
+            
+            ### Downloads
+            - **Android**: `EpicDash-v${{ steps.version.outputs.version }}.apk`
+            - **Firmware**: `firmware.bin`, `bootloader.bin`, `partitions.bin`
+            
+            ### Installation
+            - **Android**: Enable "Install from unknown sources" and install APK
+            - **Firmware**: Flash using ESP Web Tools or esptool
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
