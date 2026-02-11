@@ -14,8 +14,8 @@
 // ============================================================================
 // 硬件引脚定义
 // ============================================================================
-#define RGB_PIN 38   // WS2812 data pin
-#define ADC1_PIN 5 // Hardware ADC input for ADC1 (GPIO 5)
+#define RGB_PIN 38           // WS2812 data pin
+#define ADC1_PIN 5           // Hardware ADC input for ADC1 (GPIO 5)
 #define DIGITAL_INPUT_PIN 1  // IO1 - touch sensor
 
 // MCP2515引脚配置
@@ -26,31 +26,31 @@ static const uint32_t QUARTZ_FREQUENCY = 8UL * 1000UL * 1000UL;  // 8MHz晶振
 // ============================================================================
 // 硬件配置
 // ============================================================================
-#define ADC1_SAMPLE_INTERVAL_MS 10// Sample every 10ms (100 Hz)
-#define ADC1_FILTER_SAMPLES 1  // Number of samples for averaging filter (1 = no filter)
-#define ADC1_CHANGE_THRESHOLD 5  // Minimum change to trigger CAN send
+#define ADC1_SAMPLE_INTERVAL_MS 10  // Sample every 10ms (100 Hz)
+#define ADC1_FILTER_SAMPLES 1       // Number of samples for averaging filter (1 = no filter)
+#define ADC1_CHANGE_THRESHOLD 5     // Minimum change to trigger CAN send
 
 
-#define DIGITAL_SAMPLE_INTERVAL_MS 20 // Sample every 20ms (50 Hz)
-#define DIGITAL_DEBOUNCE_MS 50 // Debounce time
+#define DIGITAL_SAMPLE_INTERVAL_MS 20  // Sample every 20ms (50 Hz)
+#define DIGITAL_DEBOUNCE_MS 50         // Debounce time
 
 
 // ============================================================================
 // 超时配置
 // ============================================================================
-#define VAR_REQUEST_TIMEOUT_MS 100  // Timeout waiting for ECU response
-#define BLE_NOTIFY_MIN_INTERVAL_MS 10 // Minimum interval between BLE notifications
-#define RECONNECT_DELAY_MS 100  // Delay before restarting advertising (was 500)
+#define VAR_REQUEST_TIMEOUT_MS 100     // Timeout waiting for ECU response
+#define BLE_NOTIFY_MIN_INTERVAL_MS 10  // Minimum interval between BLE notifications
+#define RECONNECT_DELAY_MS 100         // Delay before restarting advertising (was 500)
 
 // ============================================================================
 // CAN协议定义
 // ============================================================================
-#define TS_HW_BUTTONBOX1_CATEGORY 27 // hardware button box 1
-#define CANBUS_BUTTONBOX_ADDRESS 0x711 // CANBUS BUTTONBOX TX
+#define TS_HW_BUTTONBOX1_CATEGORY 27    // hardware button box 1
+#define CANBUS_BUTTONBOX_ADDRESS 0x711  // CANBUS BUTTONBOX TX
 #define ECU_ID 1
-#define CAN_VAR_REQUEST_BASE 0x700 // TX: Request variable (0x700 + ecuId)
-#define CAN_VAR_RESPONSE_BASE 0x720 // RX: Variable broadcast (0x720 + ecuId)
-#define CAN_GPS_DATA_BASE 0x780  // TX: GPS data to ECU (0x780 + ecuId)
+#define CAN_VAR_REQUEST_BASE 0x700   // TX: Request variable (0x700 + ecuId)
+#define CAN_VAR_RESPONSE_BASE 0x720  // RX: Variable broadcast (0x720 + ecuId)
+#define CAN_GPS_DATA_BASE 0x780      // TX: GPS data to ECU (0x780 + ecuId)
 
 // ============================================================================
 // BLE UUID定义
@@ -64,21 +64,22 @@ static const uint32_t QUARTZ_FREQUENCY = 8UL * 1000UL * 1000UL;  // 8MHz晶振
 // ============================================================================
 // 批量请求配置
 // ============================================================================
-#define MAX_BATCH_VARS 16 // 4 bytes hash + 4 bytes value
+#define MAX_BATCH_VARS 16  // 4 bytes hash + 4 bytes value
 #define VAR_RESPONSE_SIZE 8
 
 // ============================================================================
 // 变量哈希定义
 // ============================================================================
 // GPS变量哈希
-const int32_t VAR_HASH_GPS_HMSD_PACKED = 703958849;  // Hours, minutes, seconds, days (packed)
-const int32_t VAR_HASH_GPS_MYQSAT_PACKED = -1519914092; // Months, years, quality, satellites (packed)
+const int32_t VAR_HASH_GPS_HMSD_PACKED = 703958849;      // Hours, minutes, seconds, days (packed)
+const int32_t VAR_HASH_GPS_MYQSAT_PACKED = -1519914092;  // Months, years, quality, satellites (packed)
 const int32_t VAR_HASH_GPS_ACCURACY = -1489698215;
 const int32_t VAR_HASH_GPS_ALTITUDE = -2100224086;
 const int32_t VAR_HASH_GPS_COURSE = 1842893663;
 const int32_t VAR_HASH_GPS_LATITUDE = 1524934922;
 const int32_t VAR_HASH_GPS_LONGITUDE = -809214087;
 const int32_t VAR_HASH_GPS_SPEED = -1486968225;
+
 
 // 虚拟ADC变量哈希
 const int32_t VAR_HASH_ADC[16] = {
@@ -112,4 +113,4 @@ float readFloat32BigEndian(const uint8_t* in);
 void writeFloat32BigEndian(float value, uint8_t* out);
 void logMessage(const String& message);
 
-#endif // PROJECT_CONFIG_H
+#endif  // PROJECT_CONFIG_H

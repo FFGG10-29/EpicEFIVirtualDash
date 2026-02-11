@@ -71,7 +71,7 @@ bool BleManager::init() {
   pVarDataChar = pService->createCharacteristic(
     CHAR_VAR_DATA_UUID,
     BLECharacteristic::PROPERTY_NOTIFY);
-  pVarDataChar->addDescriptor(new BLE2902());
+
 
   // 创建变量请求特征
   pVarRequestChar = pService->createCharacteristic(
